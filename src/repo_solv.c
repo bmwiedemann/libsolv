@@ -569,6 +569,14 @@ repo_add_solv(Repo *repo, FILE *fp, int flags)
   unsigned char *buf, *bufend, *dp, *dps;
   Id stack[3 * 5];
   int keydepth;
+  /* number of rels to decode ahead so the prefetches of the idmap
+   * entries and hash slots have time to pull in the cache lines */
+#define RELDEP_AHEAD 16
+  Id relnbuf[RELDEP_AHEAD], relebuf[RELDEP_AHEAD];
+  int relfbuf[RELDEP_AHEAD];
+  Hashval relhbuf[RELDEP_AHEAD];
+  char reldefer[RELDEP_AHEAD];
+  int chunk, j;
   int needchunk;	/* need a new chunk of data */
   unsigned int now;
   int oldnstrings = pool->ss.nstrings;
@@ -820,33 +828,75 @@ repo_add_solv(Repo *repo, FILE *fp, int flags)
       /*
        * read RelDeps from repo
        */
-      for (i = 0; i < numrel; i++)
+      for (i = 0; i < numrel && !data.error; i += chunk)
 	{
-	  name = read_id(&data, i + numid);	/* read (repo relative) Ids */
-	  evr = read_id(&data, i + numid);
-	  relflags = read_u8(&data);
-	  name = idmap[name];		/* map to (pool relative) Ids */
-	  evr = idmap[evr];
-	  h = relhash(name, evr, relflags) & hashmask;
-	  hh = HASHCHAIN_START;
-	  for (;;)
+	  chunk = numrel - i > RELDEP_AHEAD ? RELDEP_AHEAD : numrel - i;
+
+	  /* first pass: decode a chunk of rels and prefetch the idmap
+	   * entries they reference */
+	  for (j = 0; j < chunk; j++)
 	    {
-	      id = hashtbl[h];
-	      if (!id)		/* end of hash chain reached */
-		break;
-	      if (ran[id].name == name && ran[id].evr == evr && ran[id].flags == relflags)
-		break;
-	      h = HASHCHAIN_NEXT(h, hh, hashmask);
+	      relnbuf[j] = read_id(&data, i + j + numid);	/* read (repo relative) Ids */
+	      relebuf[j] = read_id(&data, i + j + numid);
+	      relfbuf[j] = read_u8(&data);
+	      solv_prefetch(idmap + relnbuf[j]);
+	      solv_prefetch(idmap + relebuf[j]);
 	    }
-	  if (!id)		/* new RelDep */
+	  if (data.error)
+	    break;
+
+	  /* second pass: map to pool ids and prefetch the hash slots and
+	   * the rels they contain. rels referencing a rel from this chunk
+	   * are not in the idmap yet, defer them to the third pass */
+	  for (j = 0; j < chunk; j++)
 	    {
-	      id = pool->nrels++;
-	      hashtbl[h] = id;
-	      ran[id].name = name;
-	      ran[id].evr = evr;
-	      ran[id].flags = relflags;
+	      if ((reldefer[j] = relnbuf[j] >= numid + i || relebuf[j] >= numid + i) != 0)
+		continue;
+	      relnbuf[j] = idmap[relnbuf[j]];	/* map to (pool relative) Ids */
+	      relebuf[j] = idmap[relebuf[j]];
+	      relhbuf[j] = relhash(relnbuf[j], relebuf[j], relfbuf[j]) & hashmask;
+	      solv_prefetch(hashtbl + relhbuf[j]);
 	    }
-	  idmap[i + numid] = MAKERELDEP(id);   /* fill Id map */
+	  for (j = 0; j < chunk; j++)
+	    if (!reldefer[j])
+	      solv_prefetch(ran + hashtbl[relhbuf[j]]);
+
+	  /* third pass: intern the prehashed rels */
+	  for (j = 0; j < chunk; j++)
+	    {
+	      relflags = relfbuf[j];
+	      if (!reldefer[j])
+		{
+		  name = relnbuf[j];
+		  evr = relebuf[j];
+		  h = relhbuf[j];
+		}
+	      else
+		{
+		  name = idmap[relnbuf[j]];	/* map to (pool relative) Ids */
+		  evr = idmap[relebuf[j]];
+		  h = relhash(name, evr, relflags) & hashmask;
+		}
+	      hh = HASHCHAIN_START;
+	      for (;;)
+		{
+		  id = hashtbl[h];
+		  if (!id)		/* end of hash chain reached */
+		    break;
+		  if (ran[id].name == name && ran[id].evr == evr && ran[id].flags == relflags)
+		    break;
+		  h = HASHCHAIN_NEXT(h, hh, hashmask);
+		}
+	      if (!id)		/* new RelDep */
+		{
+		  id = pool->nrels++;
+		  hashtbl[h] = id;
+		  ran[id].name = name;
+		  ran[id].evr = evr;
+		  ran[id].flags = relflags;
+		}
+	      idmap[i + j + numid] = MAKERELDEP(id);   /* fill Id map */
+	    }
 	}
       if ((unsigned int)pool->nrels >= (unsigned int)SOLV_MAX_INDEX)
 	solv_ovfl("relation count overflow");
