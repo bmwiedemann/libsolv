@@ -74,7 +74,7 @@ stringpool_clone(Stringpool *ss, Stringpool *from)
   ss->sstrings = from->sstrings;
 }
 
-static void
+void
 stringpool_resize_hash(Stringpool *ss, int numnew)
 {
   Hashval h, hh, hashmask;
@@ -199,14 +199,21 @@ stringpool_reserve(Stringpool *ss, int numid, Offset sizeid)
 int
 stringpool_integrate(Stringpool *ss, int numid, Offset sizeid, Id *idmap)
 {
+  /* number of strings to hash ahead so the hash table prefetches
+   * have time to pull in the cache lines before we probe */
+#define INTEGRATE_AHEAD 16
   int oldnstrings = ss->nstrings;
   Offset oldsstrings = ss->sstrings;
   Offset *str;
   Id id;
   int i, l;
-  char *strsp, *sp;
+  char *strsp, *sp, *csp;
   Hashval hashmask, h, hh;
   Hashtable hashtbl;
+  char *asp[INTEGRATE_AHEAD];
+  Hashval ah[INTEGRATE_AHEAD];
+  int al[INTEGRATE_AHEAD];
+  int chunk, j;
 
   stringpool_resize_hash(ss, numid);
   hashtbl = ss->stringhashtbl;
@@ -219,49 +226,81 @@ stringpool_integrate(Stringpool *ss, int numid, Offset sizeid, Id *idmap)
    */
   str = ss->strings;
   sp = strsp = ss->stringspace + ss->sstrings;
-  for (i = 1; i < numid; i++)
+  for (i = 1; i < numid; i += chunk)
     {
-      if (sp >= strsp + sizeid)
+      chunk = numid - i > INTEGRATE_AHEAD ? INTEGRATE_AHEAD : numid - i;
+
+      /* first pass: hash a chunk of strings and prefetch the hash table
+       * slots. strsp[sizeid] is zero, so the string walks cannot leave the
+       * buffer. the second pass only writes below the string it processes
+       * next, so hashing ahead is safe */
+      for (j = 0; j < chunk; j++)
 	{
-	  ss->nstrings = oldnstrings;
-	  ss->sstrings = oldsstrings;
-	  stringpool_freehash(ss);
-	  stringpool_shrink(ss);	/* vacuum */
-	  return 0;
-	}
-      if (!*sp)				/* shortcut for empty strings */
-	{
-	  idmap[i] = STRID_EMPTY;
-	  sp++;
-	  continue;
+	  asp[j] = sp;
+	  if (sp >= strsp + sizeid)
+	    {
+	      chunk = j + 1;		/* overflow, error out in second pass */
+	      al[j] = 0;
+	      break;
+	    }
+	  if (!*sp)
+	    {
+	      al[j] = 0;		/* empty string */
+	      sp++;
+	      continue;
+	    }
+	  h = strhash(sp) & hashmask;
+	  solv_prefetch(hashtbl + h);
+	  ah[j] = h;
+	  l = strlen(sp) + 1;
+	  al[j] = l;
+	  sp += l;
 	}
 
-      /* find hash slot */
-      h = strhash(sp) & hashmask;
-      hh = HASHCHAIN_START;
-      for (;;)
+      /* second pass: find or insert the prehashed strings */
+      for (j = 0; j < chunk; j++)
 	{
-	  id = hashtbl[h];
-	  if (!id)
-	    break;
-	  if (!strcmp(ss->stringspace + ss->strings[id], sp))
-	    break;			/* already in pool */
-	  h = HASHCHAIN_NEXT(h, hh, hashmask);
-	}
+	  csp = asp[j];
+	  if (csp >= strsp + sizeid)
+	    {
+	      ss->nstrings = oldnstrings;
+	      ss->sstrings = oldsstrings;
+	      stringpool_freehash(ss);
+	      stringpool_shrink(ss);	/* vacuum */
+	      return 0;
+	    }
+	  if (!al[j])			/* shortcut for empty strings */
+	    {
+	      idmap[i + j] = STRID_EMPTY;
+	      continue;
+	    }
 
-      /* length == offset to next string */
-      l = strlen(sp) + 1;
-      if (!id)				/* end of hash chain -> new string */
-	{
-	  id = ss->nstrings++;
-	  hashtbl[h] = id;
-	  str[id] = ss->sstrings;	/* save offset */
-	  if (sp != ss->stringspace + ss->sstrings)
-	    memmove(ss->stringspace + ss->sstrings, sp, l);
-	  ss->sstrings += l;
+	  /* find hash slot */
+	  h = ah[j];
+	  hh = HASHCHAIN_START;
+	  for (;;)
+	    {
+	      id = hashtbl[h];
+	      if (!id)
+		break;
+	      if (!strcmp(ss->stringspace + ss->strings[id], csp))
+		break;			/* already in pool */
+	      h = HASHCHAIN_NEXT(h, hh, hashmask);
+	    }
+
+	  /* length == offset to next string */
+	  l = al[j];
+	  if (!id)			/* end of hash chain -> new string */
+	    {
+	      id = ss->nstrings++;
+	      hashtbl[h] = id;
+	      str[id] = ss->sstrings;	/* save offset */
+	      if (csp != ss->stringspace + ss->sstrings)
+		memmove(ss->stringspace + ss->sstrings, csp, l);
+	      ss->sstrings += l;
+	    }
+	  idmap[i + j] = id;		/* repo relative -> pool relative */
 	}
-      idmap[i] = id;			/* repo relative -> pool relative */
-      sp += l;				/* next string */
     }
   if ((unsigned int)ss->nstrings >= (unsigned int)SOLV_MAX_INDEX)
     solv_ovfl("string count overpool");

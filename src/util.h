@@ -52,6 +52,15 @@ extern void solv_ovfl(const char *);
 #endif
 
 
+#ifdef LIBSOLV_INTERNAL
+/* hint the cpu to load a cache line ahead of its use */
+#if defined(__GNUC__) || defined(__clang__)
+#define solv_prefetch(p) __builtin_prefetch(p)
+#else
+#define solv_prefetch(p)
+#endif
+#endif
+
 static inline void *solv_extend(void *buf, size_t len, size_t nmemb, size_t size, size_t block)
 {
   if (nmemb == 1)
