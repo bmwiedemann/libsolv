@@ -678,6 +678,35 @@ pool_add_fileconflicts_deps(Pool *pool, Queue *conflicts)
     pool_freeidhashes(pool);
 }
 
+/* size the id hash tables for the given number of new strings and rels,
+ * so that loading multiple repos does not rehash all already interned
+ * ids each time the hash tables outgrow their size.
+ * this is a hint, and a large one still allocates a large hash: the cap
+ * only rejects counts no solv file could ever contain, mirroring
+ * repo_add_solv(), so that passing a garbage header value through is
+ * merely useless instead of allocating a multi-gigabyte table */
+#define MAX_RESERVE_IDS 0x20000000	/* see repo_add_solv() */
+void
+pool_reserve_ids(Pool *pool, unsigned int numid, unsigned int numrel)
+{
+  if (numid > MAX_RESERVE_IDS)
+    numid = MAX_RESERVE_IDS;
+  if (numrel > MAX_RESERVE_IDS)
+    numrel = MAX_RESERVE_IDS;
+  if (numid)
+    {
+      stringpool_resize_hash(&pool->ss, (int)numid);
+      if (pool->ss.nstrings + (int)numid > pool->reservednstrings)
+	pool->reservednstrings = pool->ss.nstrings + (int)numid;
+    }
+  if (numrel)
+    {
+      pool_resize_rels_hash(pool, (int)numrel);
+      if (pool->nrels + (int)numrel > pool->reservednrels)
+	pool->reservednrels = pool->nrels + (int)numrel;
+    }
+}
+
 char *
 pool_prepend_rootdir(Pool *pool, const char *path)
 {

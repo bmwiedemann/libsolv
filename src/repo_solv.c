@@ -1565,3 +1565,37 @@ solv_read_userdata(FILE *fp, unsigned char **datap, int *lenp)
     *lenp = (int)n;
   return 0;
 }
+
+/* peek at the header of a solv file to learn how many string ids and
+ * rel ids adding it would bring into the pool, for pool_reserve_ids.
+ * reads the first 16 bytes, leaving the file position in the middle of
+ * the 36 byte header: callers must rewind before calling
+ * repo_add_solv(), so this needs a seekable stream, not one of the
+ * decompressing solv_xfopen() ones */
+int
+solv_read_idcounts(FILE *fp, unsigned int *numidp, unsigned int *numrelp)
+{
+  unsigned char d[4 * 4];
+  unsigned int n;
+  if (fread(d, sizeof(d), 1, fp) != 1)
+    return SOLV_ERROR_EOF;
+  n = d[0] << 24 | d[1] << 16 | d[2] << 8 | d[3];
+  if (n != ('S' << 24 | 'O' << 16 | 'L' << 8 | 'V'))
+    return SOLV_ERROR_NOT_SOLV;
+  n = d[4] << 24 | d[5] << 16 | d[6] << 8 | d[7];
+  switch(n)
+    {
+    case SOLV_VERSION_8:
+    case SOLV_VERSION_9:
+      break;
+    default:
+      return SOLV_ERROR_UNSUPPORTED;
+    }
+  *numidp = d[8] << 24 | d[9] << 16 | d[10] << 8 | d[11];
+  *numrelp = d[12] << 24 | d[13] << 16 | d[14] << 8 | d[15];
+  /* same limits repo_add_solv() enforces, so that a corrupt header is
+   * reported here instead of blowing up in the caller's reserve */
+  if (*numidp >= 0x20000000 || *numrelp >= 0x20000000)
+    return SOLV_ERROR_CORRUPT;
+  return 0;
+}

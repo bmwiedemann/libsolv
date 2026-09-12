@@ -374,7 +374,7 @@ void
 pool_shrink_strings(Pool *pool)
 {
   /* free excessive big hashes */
-  if (pool->ss.stringhashmask && pool->ss.stringhashmask > mkmask(pool->ss.nstrings + 8192))
+  if (pool->ss.stringhashmask && pool->ss.stringhashmask > mkmask((pool->ss.nstrings > pool->reservednstrings ? pool->ss.nstrings : pool->reservednstrings) + 8192))
     stringpool_freehash(&pool->ss);
   stringpool_shrink(&pool->ss);
 }
@@ -383,7 +383,7 @@ void
 pool_shrink_rels(Pool *pool)
 {
   /* free excessive big hashes */
-  if (pool->relhashmask && pool->relhashmask > mkmask(pool->nrels + 4096))
+  if (pool->relhashmask && pool->relhashmask > mkmask((pool->nrels > pool->reservednrels ? pool->nrels : pool->reservednrels) + 4096))
     pool_free_rels_hash(pool);
   pool->rels = solv_extend_resize(pool->rels, pool->nrels, sizeof(Reldep), REL_BLOCK);
 }

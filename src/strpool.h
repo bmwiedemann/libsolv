@@ -40,6 +40,7 @@ Id stringpool_strn2id(Stringpool *ss, const char *str, unsigned int len, int cre
 void stringpool_shrink(Stringpool *ss);
 
 void stringpool_reserve(Stringpool *ss, int numid, Offset sizeid);
+void stringpool_resize_hash(Stringpool *ss, int numnew);	/* internal, not exported */
 int stringpool_integrate(Stringpool *ss, int numid, Offset sizeid, Id *idmap);
 
 

@@ -166,6 +166,11 @@ struct s_Pool {
   int nonstd_nids;
 
   int whatprovideswithdisabled;
+
+  /* new internal fields go here, at the end, so that adding one does
+   * not move the offsets libsolvext.so was compiled against */
+  int reservednstrings;		/* pool_reserve_ids: do not shrink the hashes below this */
+  int reservednrels;
 #endif
 };
 
@@ -273,6 +278,7 @@ extern char *pool_errstr(Pool *pool);
 
 extern void pool_set_rootdir(Pool *pool, const char *rootdir);
 extern const char *pool_get_rootdir(Pool *pool);
+extern void pool_reserve_ids(Pool *pool, unsigned int numid, unsigned int numrel);
 extern char *pool_prepend_rootdir(Pool *pool, const char *dir);
 extern const char *pool_prepend_rootdir_tmp(Pool *pool, const char *dir);
 
