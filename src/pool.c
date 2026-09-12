@@ -17,6 +17,9 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/mman.h>
+#endif
 
 #include "pool.h"
 #include "poolvendor.h"
@@ -117,6 +120,20 @@ pool_free(Pool *pool)
   solv_free(pool->errstr);
   solv_free(pool->rootdir);
   solv_free(pool->nonstd_ids);
+#ifdef __linux__
+  if (pool->snapshot_base)
+    {
+      /* frees of arrays borrowed from the snapshot mapping were
+       * no-ops above; unregister the range first so a fresh
+       * allocation can never alias the unmapped region */
+      void *base = pool->snapshot_base;
+      size_t size = pool->snapshot_size;
+      solv_free(pool);
+      solv_set_borrowed(0, 0);
+      munmap(base, size);
+      return;
+    }
+#endif
   solv_free(pool);
 }
 

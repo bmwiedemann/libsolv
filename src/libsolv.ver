@@ -478,3 +478,12 @@ SOLV_1.3 {
 		solv_setcloexec;
 		pool_conda_matchspec;
 } SOLV_1.2;
+
+SOLV_1.4 {
+		pool_reserve_ids;
+		pool_snapshot_map;
+		pool_snapshot_mapping;
+		pool_snapshot_read_cookie;
+		pool_snapshot_write;
+		solv_read_idcounts;
+} SOLV_1.3;

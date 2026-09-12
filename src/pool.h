@@ -173,6 +173,8 @@ struct s_Pool {
   int reservednrels;
   int keepidhashes;		/* true: keep the id hashes in pool_createwhatprovides */
   int nowhatprovidesshrink;	/* true: do not unify the whatprovides data */
+  void *snapshot_base;		/* snapshot mapping some pool arrays borrow from, */
+  size_t snapshot_size;		/* unmapped at the end of pool_free */
 #endif
 };
 
