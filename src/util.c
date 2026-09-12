@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdint.h>
 #include <fcntl.h>
 #ifdef _WIN32
   #include <windows.h>
@@ -57,9 +58,54 @@ solv_malloc2(size_t num, size_t len)
   return solv_malloc(num * len);
 }
 
+/* Borrowed memory range, e.g. arrays pointing into a file mapping
+ * restored by pool_snapshot_map(). Such pointers must not reach
+ * realloc()/free(); solv_realloc migrates them to the heap by copying,
+ * solv_free ignores them. A single range suffices: only one snapshot
+ * mapping can be registered per process.
+ *
+ * NOT thread safe: solv_set_borrowed() must be called while no other
+ * thread uses the library, which is the case for its only caller
+ * (pool_snapshot_map/pool_free, before resp. after the mapping is
+ * reachable). Once registered, the range is only read.
+ *
+ * The bounds are uintptr_t, as comparing an unrelated pointer against
+ * the range with < / >= is undefined for real pointers. */
+static uintptr_t solv_borrowed_base;
+static uintptr_t solv_borrowed_len;
+
+int
+solv_set_borrowed(void *base, size_t len)
+{
+  if (base && solv_borrowed_base)
+    return -1;			/* one range per process */
+  solv_borrowed_base = (uintptr_t)base;
+  solv_borrowed_len = base ? len : 0;
+  return 0;
+}
+
+static inline int
+solv_is_borrowed(void *mem)
+{
+  /* the base test first: it is the only one that matters for the
+   * overwhelmingly common case of no snapshot being mapped at all */
+  return solv_borrowed_base != 0 && (uintptr_t)mem - solv_borrowed_base < solv_borrowed_len;
+}
+
 void *
 solv_realloc(void *old, size_t len)
 {
+  if (old && solv_is_borrowed(old))
+    {
+      /* migrate to the heap. The old length is unknown, but the old
+       * data cannot extend past the borrowed range, so clamping the
+       * copy there preserves everything realloc() would (only the
+       * common prefix is defined) */
+      size_t clen = solv_borrowed_len - ((uintptr_t)old - solv_borrowed_base);
+      void *r = solv_malloc(len);
+      memcpy(r, old, len < clen ? len : clen);
+      return r;
+    }
   if (old == 0)
     old = malloc(len ? len : 1);
   else
@@ -119,7 +165,7 @@ solv_extend_realloc(void *old, size_t len, size_t size, size_t block)
 void *
 solv_free(void *mem)
 {
-  if (mem)
+  if (mem && !solv_is_borrowed(mem))
     free(mem);
   return 0;
 }

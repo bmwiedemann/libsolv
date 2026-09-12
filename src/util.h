@@ -31,6 +31,12 @@ extern void *solv_realloc(void *, size_t);
 extern void *solv_realloc2(void *, size_t, size_t);
 extern void *solv_extend_realloc(void *, size_t, size_t, size_t);
 extern void *solv_free(void *);
+#ifdef LIBSOLV_INTERNAL
+/* register a range solv_free()/solv_realloc() must not hand to the
+ * allocator, see pool_snapshot_map(). Deliberately not exported: it
+ * turns solv_free() into a no-op for arbitrary addresses */
+extern int solv_set_borrowed(void *base, size_t len);
+#endif
 extern char *solv_strdup(const char *);
 extern void solv_oom(size_t, size_t);
 extern unsigned int solv_timems(unsigned int subtract);
