@@ -171,6 +171,7 @@ struct s_Pool {
    * not move the offsets libsolvext.so was compiled against */
   int reservednstrings;		/* pool_reserve_ids: do not shrink the hashes below this */
   int reservednrels;
+  int keepidhashes;		/* true: keep the id hashes in pool_createwhatprovides */
 #endif
 };
 
@@ -211,6 +212,7 @@ struct s_Pool {
 #define POOL_FLAG_IMPLICITOBSOLETEUSESCOLORS		10
 #define POOL_FLAG_NOWHATPROVIDESAUX			11
 #define POOL_FLAG_WHATPROVIDESWITHDISABLED		12
+#define POOL_FLAG_KEEPIDHASHES				13
 
 /* ----------------------------------------------- */
 
