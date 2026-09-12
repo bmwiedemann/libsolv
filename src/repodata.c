@@ -1392,11 +1392,41 @@ solvabledata_fetch(Solvable *s, KeyValue *kv, Id keyname)
     }
 }
 
+/* Test whether a SEARCH_GLOB pattern uses no glob feature at all, so that
+ * matching it with fnmatch is equivalent to a plain string compare.
+ *
+ * Without SEARCH_NOCASE the equivalence is exact. With SEARCH_NOCASE
+ * fnmatch folds case per locale while strcasecmp folds only ASCII, so
+ * the pattern is additionally required to be pure ASCII. That still
+ * leaves the theoretical case of a non-ASCII candidate character whose
+ * locale case folding is an ASCII character (U+212A KELVIN SIGN, or
+ * dotless i in tr_TR); such a candidate no longer matches. */
+static int
+glob_is_plain_string(const char *match, int flags)
+{
+  const unsigned char *p;
+  if (match[strcspn(match, "*?[\\")])
+    return 0;			/* has a glob metacharacter */
+  if (!(flags & SEARCH_NOCASE))
+    return 1;
+  for (p = (const unsigned char *)match; *p; p++)
+    if (*p >= 0x80)
+      return 0;
+  return 1;
+}
+
 int
 datamatcher_init(Datamatcher *ma, const char *match, int flags)
 {
   match = match ? solv_strdup(match) : 0;
   ma->match = match;
+  if ((flags & SEARCH_STRINGMASK) == SEARCH_GLOB && match && glob_is_plain_string(match, flags))
+    {
+      /* a glob without metacharacters matches exactly one string, so
+       * use strcmp/strcasecmp instead of running the much more
+       * expensive fnmatch on every candidate value */
+      flags = (flags & ~SEARCH_STRINGMASK) | SEARCH_STRING;
+    }
   ma->flags = flags;
   ma->error = 0;
   ma->matchdata = 0;
