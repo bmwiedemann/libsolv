@@ -1,4 +1,18 @@
 IF (NOT WIN32)
+    # link the same way tools/ does: a build with CMAKE_SKIP_RPATH has no
+    # way to find libsolv.so from the build tree, so prefer the static lib
+    # wherever the tools do
+    IF (ENABLE_STATIC AND NOT DISABLE_SHARED AND ENABLE_STATIC_TOOLS)
+        SET (LIBSOLV_TEST_LIBRARY libsolv_static)
+    ELSE ()
+        SET (LIBSOLV_TEST_LIBRARY libsolv)
+    ENDIF ()
+    ADD_EXECUTABLE (pool_snapshot_test pool_snapshot.c)
+    TARGET_LINK_LIBRARIES (pool_snapshot_test ${LIBSOLV_TEST_LIBRARY})
+    ADD_TEST (pool_snapshot ${CMAKE_CURRENT_BINARY_DIR}/pool_snapshot_test ${CMAKE_CURRENT_BINARY_DIR}/pool_snapshot.tmp)
+ENDIF ()
+
+IF (NOT WIN32)
     SET (RUNTESTCASES_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/runtestcases.sh)
 ELSE ()
     SET (RUNTESTCASES_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/runtestcases.bat)
